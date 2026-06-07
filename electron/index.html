@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Pet</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="pet-canvas" width="256" height="256"></canvas>
+  <div id="speech-bubble" class="speech-bubble hidden"></div>
+  <div id="permission-dialog" class="permission-dialog hidden">
+    <div class="permission-text"></div>
+    <div class="permission-buttons">
+      <button id="btn-allow">Allow</button>
+      <button id="btn-deny">Deny</button>
+    </div>
+  </div>
+  <script src="sprites.js"></script>
+  <script src="state-machine.js"></script>
+  <script src="speech-bubble.js"></script>
+  <script src="permission-dialog.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

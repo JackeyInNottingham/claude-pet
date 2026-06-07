@@ -1,0 +1,93 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 256px;
+  height: 256px;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+}
+
+canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.speech-bubble {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #FEF3C7;
+  border: 2px solid #92400E;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-family: -apple-system, sans-serif;
+  font-size: 11px;
+  color: #92400E;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.speech-bubble.hidden {
+  opacity: 0;
+}
+
+.permission-dialog {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #FEF3C7;
+  border: 2px solid #92400E;
+  border-radius: 10px;
+  padding: 8px 12px;
+  text-align: center;
+  -webkit-app-region: no-drag;
+}
+
+.permission-dialog.hidden {
+  display: none;
+}
+
+.permission-text {
+  font-family: -apple-system, sans-serif;
+  font-size: 11px;
+  color: #92400E;
+  margin-bottom: 6px;
+  max-width: 180px;
+  word-break: break-all;
+}
+
+.permission-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.permission-buttons button {
+  padding: 2px 12px;
+  border: 1px solid #92400E;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: -apple-system, sans-serif;
+}
+
+#btn-allow {
+  background: #F59E0B;
+  color: white;
+}
+
+#btn-deny {
+  background: #FEF3C7;
+  color: #92400E;
+}
