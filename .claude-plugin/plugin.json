@@ -1,0 +1,26 @@
+{
+  "name": "claude-pet",
+  "description": "Desktop pet that shows Claude Code's running status with a cute pixel-art mascot. Reflects real-time states like reading, writing, executing, and handles permission requests through an interactive dialog.",
+  "author": {
+    "name": "Jiyao Fei",
+    "email": ""
+  },
+  "homepage": "",
+  "repository": "",
+  "license": "MIT",
+  "keywords": ["desktop-pet", "status", "ui", "fun"],
+  "hooks": "./hooks/",
+  "commands": "./commands/",
+  "interface": {
+    "displayName": "Claude Pet",
+    "shortDescription": "Cute desktop pet reflecting Claude Code status",
+    "longDescription": "A pixel-art desktop pet that lives on your screen and reflects Claude Code's real-time status through animations. See when Claude is reading, thinking, writing, or executing commands. Interactive permission dialog lets you approve or deny actions directly from the pet.",
+    "developerName": "Jiyao Fei",
+    "category": "UI",
+    "capabilities": ["Interactive", "Read"],
+    "brandColor": "#F59E0B",
+    "composerIcon": "",
+    "logo": "",
+    "screenshots": []
+  }
+}
