@@ -14,3 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('command', (_event, data) => callback(data));
   }
 });
+
+// Notify main process when drag ends (for position persistence)
+window.addEventListener('mouseup', () => {
+  ipcRenderer.send('window-dragged');
+});
