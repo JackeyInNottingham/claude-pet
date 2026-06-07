@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Auto-launch the Electron pet app on Claude Code session start
+PLUGIN_ROOT="$(dirname "$(dirname "$0")")"
+ELECTRON_DIR="$PLUGIN_ROOT/electron"
+PORT_FILE="$HOME/.claude-pet/port"
+
+# If pet is already running, skip
+if [ -f "$PORT_FILE" ]; then
+  PORT=$(cat "$PORT_FILE")
+  if curl -s "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; then
+    exit 0
+  fi
+fi
+
+# Check if auto-start is disabled
+if [ -f "$HOME/.claude-pet/auto-start-disabled" ]; then
+  exit 0
+fi
+
+# Install deps if needed
+if [ ! -d "$ELECTRON_DIR/node_modules" ]; then
+  cd "$ELECTRON_DIR" && npm install --silent 2>/dev/null &
+fi
+
+# Launch Electron in background
+cd "$ELECTRON_DIR"
+npx electron . > /dev/null 2>&1 &
