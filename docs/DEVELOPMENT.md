@@ -1,7 +1,7 @@
 # Claude Pet 开发文档
 
 > 本文档记录 Claude Pet 桌宠插件的架构、动画系统、权限互动与本地开发方式。  
-> 最后更新：2026-06-08
+> 最后更新：2026-06-08（版本更新 + 跨平台 Hook + 安装脚本修复）
 
 ## 1. 项目概述
 
@@ -13,6 +13,8 @@ Claude Pet 是 Claude Code 的桌面插件：通过 Hook 感知 Claude 的运行
 - 3 种权限互动状态（等待确认、允许反馈、拒绝反馈）
 - 状态间 6 帧过渡动画（约 600ms）
 - 权限弹窗对齐 Claude Code `PermissionRequest` 数据（Yes / Always allow… / No）
+- **版本自动更新检查** — 每日检查 GitHub Releases，一键更新弹窗
+- **跨平台纯 Node.js Hook** — 无需 Git Bash，仅需 Node.js 18+
 - 独立 Demo 页面，可预览全部状态与权限样例
 
 ---
@@ -35,13 +37,15 @@ Claude Code
                     └─ stdout 返回 hookSpecificOutput.decision
 
 Electron (electron/)
-  ├─ main.js          HTTP 服务 + 窗口 + IPC
-  ├─ preload.js       contextBridge
-  ├─ renderer.js      状态机 + 10 FPS 动画循环
+  ├─ main.js          HTTP 服务 + 窗口 + IPC + 版本检查调度
+  ├─ preload.js       contextBridge（新增 update IPC）
+  ├─ renderer.js      状态机 + 10 FPS 动画循环 + 更新事件
   ├─ state-machine.js FSM（10 状态）
   ├─ sprites.js       Clawd 渲染 + 道具 + PetAnimator
   ├─ permission-format.js  权限文案/选项格式化
   ├─ permission-dialog.js  动态权限 UI
+  ├─ update-checker.js     GitHub 版本检查 + git pull / npm install
+  ├─ update-dialog.js      更新提示 UI（蓝色主题）
   └─ speech-bubble.js 工具状态气泡
 ```
 
@@ -269,33 +273,44 @@ Hook 脚本超时：600s 内轮询 `permission-response`。
 
 ## 8. 文件结构（当前）
 
-```
+```text
 claude-pet/
 ├── .claude-plugin/plugin.json
-├── commands/pet.md
+├── CLAUDE.md                    # Claude Code 仓库工作指导
+├── DEVLOG.md                    # 开发日志
+├── README.md / README.zh-CN.md
+├── install.sh / install.ps1     # 一键安装脚本
+├── commands/
+│   ├── pet.md                   # /pet 命令定义
+│   ├── pet-control.js           # 跨平台命令实现（Node.js）
+│   ├── pet-control.sh           # Unix 启动器
+│   └── pet-control.cmd          # Windows 启动器
 ├── hooks/
-│   ├── hooks.json              # Pre/Post/Notification/PermissionRequest
-│   ├── notify-pet.sh           # 状态通知 + 权限阻塞脚本
-│   ├── session-start           # 自动启动 Electron
-│   └── platform-shell.sh
+│   ├── hooks.json               # Pre/Post/Notification/PermissionRequest
+│   ├── notify-pet.js            # 主入口 — 纯 Node.js 跨平台 Hook
+│   ├── notify-pet.sh            # Unix 备选
+│   ├── notify-pet.cmd           # Windows 启动器
+│   ├── session-start.js         # 自动启动逻辑（Node.js）
+│   ├── session-start            # Unix 备选
+│   ├── session-start.cmd        # Windows 启动器
+│   └── run-hook.cmd             # 向后兼容桥接器
 ├── electron/
-│   ├── main.js
-│   ├── preload.js
-│   ├── index.html
-│   ├── style.css
-│   ├── renderer.js
-│   ├── state-machine.js        # 10 状态 FSM
-│   ├── sprites.js              # Clawd 渲染 + PetAnimator
-│   ├── permission-format.js    # 权限文案/选项
-│   ├── permission-dialog.js    # 权限 UI
-│   ├── speech-bubble.js
+│   ├── main.js                  # Electron 入口 + HTTP 服务
+│   ├── preload.js               # contextBridge IPC
+│   ├── renderer.js              # 10 FPS Canvas 动画循环
+│   ├── state-machine.js         # 10 状态 FSM
+│   ├── sprites.js               # Clawd 渲染 + PetAnimator
+│   ├── permission-format.js     # 权限文案/选项
+│   ├── permission-dialog.js     # 权限弹窗 UI
+│   ├── update-checker.js        # 版本检查（GitHub API）
+│   ├── update-dialog.js         # 更新提示 UI
+│   ├── speech-bubble.js         # 工具状态气泡
+│   ├── index.html / style.css
 │   ├── demo-main.js / demo.html / demo.css / demo.js
-│   └── package.json            # scripts: start, demo
-├── docs/
-│   ├── DEVELOPMENT.md          # 本文档
-│   └── superpowers/            # 早期设计 spec / plan
-├── DEVLOG.md                   # 简要开发日志
-└── README.md
+│   └── package.json             # scripts: start, demo
+└── docs/
+    ├── DEVELOPMENT.md           # 本文档
+    └── superpowers/             # 早期设计 spec / plan
 ```
 
 ---
@@ -314,13 +329,55 @@ claude-pet/
 
 ---
 
-## 10. 已知限制与后续
+## 10. 版本自动更新
+
+### 10.1 检查机制
+
+`electron/update-checker.js` 在宠物启动 60 秒后首次检查，之后每 30 分钟轮询。`shouldCheck()` 根据 `~/.claude-pet/version.json` 中的 `lastCheck` 时间戳强制 **24 小时最小间隔**。
+
+调用 GitHub Releases API：`GET https://api.github.com/repos/JackeyInNottingham/claude-pet/releases/latest`
+
+### 10.2 更新弹窗
+
+`electron/update-dialog.js` — 蓝色主题弹窗（z-index: 9，低于权限弹窗的 10），显示版本号对比和 release notes：
+
+- **Update** — ipcMain 执行 `git pull --ff-only origin main` + `npm install`，完成后气泡提示重启
+- **Skip** — 记录 `skippedVersion` 到 `version.json`，同版本不再提示（直到更高版本发布）
+
+### 10.3 通信流程
+
+```
+主进程定时器 → checkForUpdates()
+  → GET GitHub API → 比较 semver
+  → webContents.send('update-available')
+    ↓
+渲染进程 → UpdateDialog.show()
+  → Update → spawn git pull + npm install → reply('update-result')
+  → Skip   → 写入 skippedVersion
+```
+
+---
+
+## 11. 跨平台 Hook 脚本
+
+所有 Hook 和命令已用 **纯 Node.js 重写**，仅依赖 `http`/`fs`/`path`/`os`/`crypto`/`child_process` 内置模块。
+
+| 脚本 | 替代 | 说明 |
+|------|------|------|
+| `notify-pet.js` | `notify-pet.sh` | 主入口，处理所有 Hook action |
+| `session-start.js` | `session-start` (bash) | 自动启动逻辑 |
+| `pet-control.js` | `pet-control.sh` | `/pet` 命令实现 |
+
+原有的 `.sh` 脚本保留为 Unix 备选。**Windows 不再需要 Git Bash**，唯一硬依赖是 Node.js 18+。
+
+---
+
+## 12. 已知限制与后续
 
 | 项 | 说明 |
 |----|------|
 | 窗口尺寸 | 正式桌宠 256×256，权限弹窗靠滚动适配长内容 |
 | 权限响应 | 依赖 Hook 脚本轮询文件，非 HTTP 长连接 |
-| Windows | 需 Git Bash 运行 Hook；完整测试待做 |
 | Marketplace | 尚未发布 |
 
 **可选后续：**
@@ -331,8 +388,10 @@ claude-pet/
 
 ---
 
-## 11. 相关文档
+## 13. 相关文档
 
+- [CLAUDE.md](../CLAUDE.md) — Claude Code 工作指导
+- [DEVLOG.md](../DEVLOG.md) — 开发日志
 - [初始设计 spec](./superpowers/specs/2026-06-07-claude-pet-design.md)
 - [实现计划 plan](./superpowers/plans/2026-06-07-claude-pet-plan.md)
 - [Claude Code Hooks 官方文档](https://code.claude.com/docs/en/hooks)

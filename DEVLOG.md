@@ -2,7 +2,7 @@
 
 ## 项目状态
 
-**2026-06-08**: 吉祥物已对齐 Claude Code 终端 Clawd；10 状态动画 + 过渡 + 权限互动已完成。详见 **[docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**。
+**2026-06-08**: 跨平台 Node.js Hook + 版本自动更新 + 安装脚本修复已完成。详见 **[docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)**。
 
 ## 已完成
 
@@ -13,12 +13,16 @@
 - [x] PermissionRequest Hook + 弹窗（Yes / Always allow / No）
 - [x] 动画 Demo（`npm run demo`）
 - [x] HTTP localhost + 状态机 + 气泡/托盘/位置记忆
+- [x] **跨平台纯 Node.js Hook**（无需 Git Bash，仅需 Node.js 18+）
+- [x] **版本自动更新检查** — GitHub Releases API 每日检查，蓝色更新弹窗，一键 git pull + npm install
+- [x] **安装脚本修复** — 路径改为 `~/.claude/skills/claude-pet/`，移除无效的 `claude plugin install` 调用
+- [x] Windows 平台适配验证通过
 
 ## 待办
 
 - [ ] Plugin Marketplace 发布
-- [ ] Windows 平台完整测试
 - [ ] 权限弹窗大内容时自动扩展窗口（可选）
+- [ ] `elicitation_dialog`（MCP 表单）支持（可选）
 
 ## 快速启动
 
