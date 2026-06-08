@@ -31,6 +31,8 @@ claude plugin install claude-pet
 
 The plugin uses Claude Code hooks to detect tool usage and sends state notifications to a local Electron app via localhost HTTP. The Electron app renders a transparent, always-on-top pixel-art window.
 
+See [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) for architecture, animation states, permission dialog, and demo instructions.
+
 ## Requirements
 
 - Node.js 18+

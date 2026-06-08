@@ -4,7 +4,8 @@
   "private": true,
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "demo": "electron demo-main.js"
   },
   "dependencies": {
     "electron": "^33.2.1"

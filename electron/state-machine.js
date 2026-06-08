@@ -1,4 +1,4 @@
-// Claude Pet state machine — 7 states driven by hook events
+// Claude Pet state machine — 8 states + permission feedback
 const STATES = {
   IDLE: 'idle',
   READING: 'reading',
@@ -6,12 +6,16 @@ const STATES = {
   THINKING: 'thinking',
   WRITING: 'writing',
   EXECUTING: 'executing',
-  ERROR: 'error'
+  ERROR: 'error',
+  PERMISSION: 'permission',
+  PERMISSION_ALLOW: 'permission_allow',
+  PERMISSION_DENY: 'permission_deny'
 };
 
 // How long before returning to idle after a tool finishes (ms)
 const THINKING_TIMEOUT = 3000;
 const ERROR_DISPLAY_MS = 3000;
+const PERMISSION_FEEDBACK_MS = 350;
 
 class StateMachine {
   constructor(onStateChange) {
@@ -20,7 +24,14 @@ class StateMachine {
     this.onStateChange = onStateChange;
     this.thinkingTimer = null;
     this.errorTimer = null;
+    this.feedbackTimer = null;
     this.lastToolTime = 0;
+  }
+
+  isPermissionLocked() {
+    return this.currentState === STATES.PERMISSION ||
+      this.currentState === STATES.PERMISSION_ALLOW ||
+      this.currentState === STATES.PERMISSION_DENY;
   }
 
   // Map hook tool name matcher to state
@@ -72,10 +83,63 @@ class StateMachine {
     }, ERROR_DISPLAY_MS);
   }
 
+  // Permission dialog shown — overrides tool states until resolved
+  enterPermission(detail) {
+    this.clearTimers();
+    this.setState(STATES.PERMISSION, detail || 'Permission needed');
+  }
+
+  permissionResolved(decision) {
+    this.clearTimers();
+    const allow = typeof decision === 'string'
+      ? decision === 'allow'
+      : decision && decision.behavior === 'allow';
+    this.setState(
+      allow ? STATES.PERMISSION_ALLOW : STATES.PERMISSION_DENY,
+      typeof decision === 'string' ? decision : decision.behavior
+    );
+    this.feedbackTimer = setTimeout(() => {
+      this.feedbackTimer = null;
+      if (allow) this.enterThinking();
+      else this.goIdle();
+    }, PERMISSION_FEEDBACK_MS);
+  }
+
   // Called on Stop hook or manual reset
   goIdle() {
     this.clearTimers();
     this.setState(STATES.IDLE, '');
+  }
+
+  // Called by renderer when main process sends a resolved state name
+  applyRemoteState(state, detail) {
+    if (this.isPermissionLocked() && state !== STATES.IDLE) return;
+
+    const valid = Object.values(STATES);
+    if (!valid.includes(state)) return;
+
+    if (state === STATES.IDLE) {
+      this.goIdle();
+      return;
+    }
+    if (state === STATES.ERROR) {
+      this.toolFailed('hook', detail || 'failed');
+      return;
+    }
+    if (state === STATES.THINKING) {
+      this.enterThinking();
+      return;
+    }
+    if (state === STATES.PERMISSION) {
+      this.enterPermission(detail);
+      return;
+    }
+    if (state === STATES.PERMISSION_ALLOW || state === STATES.PERMISSION_DENY) {
+      return;
+    }
+
+    this.clearTimers();
+    this.setState(state, detail || '');
   }
 
   setState(state, detail) {
@@ -89,6 +153,7 @@ class StateMachine {
   clearTimers() {
     if (this.thinkingTimer) { clearTimeout(this.thinkingTimer); this.thinkingTimer = null; }
     if (this.errorTimer) { clearTimeout(this.errorTimer); this.errorTimer = null; }
+    if (this.feedbackTimer) { clearTimeout(this.feedbackTimer); this.feedbackTimer = null; }
   }
 
   getState() {

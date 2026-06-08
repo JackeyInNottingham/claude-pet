@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Pet — Animation Demo</title>
+  <link rel="stylesheet" href="demo.css">
+</head>
+<body>
+  <div class="demo-app">
+    <header class="demo-header">
+      <h1>Claude Pet 动画 Demo</h1>
+      <p>权限样例：点下方 1–4 或按数字键 · P 循环切换 · 空格随机状态</p>
+    </header>
+
+    <div class="demo-stage-wrap">
+      <div class="demo-stage">
+        <div id="demo-bubble" class="demo-bubble"></div>
+        <canvas id="demo-canvas" width="256" height="256"></canvas>
+      </div>
+
+      <div class="demo-perm-panel">
+        <p id="perm-placeholder" class="demo-perm-placeholder">↑ 点击「1 短命令」等按钮，在此预览 Claude Code 权限弹窗</p>
+        <div id="permission-dialog" class="demo-permission hidden">
+          <div class="permission-title"></div>
+          <div class="permission-body">
+            <pre class="permission-detail"></pre>
+          </div>
+          <div class="permission-buttons"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-panel">
+      <dl class="demo-status">
+        <dt>当前状态</dt>
+        <dd id="stat-current" class="highlight">idle</dd>
+        <dt>显示中（过渡）</dt>
+        <dd id="stat-display">idle</dd>
+        <dt>上一状态</dt>
+        <dd id="stat-from">—</dd>
+        <dt>下一随机切换</dt>
+        <dd id="stat-countdown">—</dd>
+        <dt>权限样例</dt>
+        <dd id="stat-perm-sample">短命令</dd>
+      </dl>
+
+      <div class="demo-progress" title="过渡进度">
+        <div id="progress-bar" class="demo-progress-bar"></div>
+      </div>
+
+      <div class="demo-controls">
+        <label>
+          <input type="checkbox" id="auto-random" checked>
+          自动随机切换
+        </label>
+        <button type="button" class="demo-btn primary" id="btn-random">立即随机 (Space)</button>
+        <button type="button" class="demo-btn" id="btn-permission">模拟权限 (P)</button>
+      </div>
+
+      <div class="demo-perm-samples">
+        <span class="demo-perm-label">权限样例：</span>
+        <button type="button" class="demo-btn demo-btn-sm" data-perm="0">1 短命令</button>
+        <button type="button" class="demo-btn demo-btn-sm" data-perm="1">2 长命令</button>
+        <button type="button" class="demo-btn demo-btn-sm" data-perm="2">3 多选项</button>
+        <button type="button" class="demo-btn demo-btn-sm" data-perm="3">4 Edit</button>
+      </div>
+
+      <div class="demo-chips" id="state-chips"></div>
+    </div>
+
+    <footer class="demo-footer"></footer>
+  </div>
+
+  <script src="sprites.js"></script>
+  <script src="state-machine.js"></script>
+  <script src="permission-format.js"></script>
+  <script src="permission-dialog.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>

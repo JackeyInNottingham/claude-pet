@@ -9,9 +9,11 @@ let frame = 0;
 let fpsInterval = null;
 let currentState = 'idle';
 let currentDetail = '';
+const petAnimator = new PetAnimator();
 
 // Initialize state machine
 const machine = new StateMachine(({ state, detail }) => {
+  petAnimator.setState(state, frame);
   currentState = state;
   currentDetail = detail;
   updateSpeechBubble(state);
@@ -31,7 +33,8 @@ function renderFrame() {
   ctx.clearRect(0, 0, 256, 256);
   ctx.scale(SCALE, SCALE);
 
-  drawPet(ctx, currentState, currentDetail, frame);
+  const transition = petAnimator.getTransition(frame);
+  drawPet(ctx, currentState, currentDetail, frame, transition);
 
   ctx.restore();
 }
@@ -45,7 +48,10 @@ function updateSpeechBubble(state) {
     thinking: 'Thinking...',
     writing: 'Writing code...',
     executing: 'Running...',
-    error: 'Oops!'
+    error: 'Oops!',
+    permission: '',
+    permission_allow: '',
+    permission_deny: ''
   };
   const text = messages[state] || '';
   if (text) {
@@ -58,17 +64,14 @@ function updateSpeechBubble(state) {
 // Listen for state changes from main process
 if (window.electronAPI) {
   window.electronAPI.onStateChange(({ state, detail }) => {
-    if (state === 'error') {
-      machine.toolFailed('hook', detail);
-    } else if (state === 'idle') {
-      machine.goIdle();
-    } else {
-      machine.toolStarted(state, detail);
-    }
+    machine.applyRemoteState(state, detail);
   });
 
   window.electronAPI.onPermissionRequest((data) => {
+    const detail = data.tool_name || data.message || data.command || 'Permission needed';
+    machine.enterPermission(detail);
     PermissionDialog.show(data, (decision) => {
+      machine.permissionResolved(decision);
       window.electronAPI.sendPermissionResponse(data.requestId || '', decision);
     });
   });

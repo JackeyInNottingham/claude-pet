@@ -50,7 +50,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" permission \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" permission-notify \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" permission-request \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
