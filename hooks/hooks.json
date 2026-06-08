@@ -2,44 +2,44 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" tool-start \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-start \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" tool-finish \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-finish \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" tool-fail \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-fail \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
     ],
     "Stop": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" idle \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" idle \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
@@ -50,18 +50,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" permission-notify \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" permission-notify \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
     ],
     "PermissionRequest": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.sh\" permission-request \"${CLAUDE_PLUGIN_ROOT}\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" permission-request \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\" \"${CLAUDE_PLUGIN_ROOT}\""
           }
         ]
       }

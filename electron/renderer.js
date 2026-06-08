@@ -11,6 +11,9 @@ let currentState = 'idle';
 let currentDetail = '';
 const petAnimator = new PetAnimator();
 
+// Track pending update version for skip action
+let pendingUpdateVersion = null;
+
 // Initialize state machine
 const machine = new StateMachine(({ state, detail }) => {
   petAnimator.setState(state, frame);
@@ -71,11 +74,56 @@ if (window.electronAPI) {
     const detail = data.tool_name || data.message || data.command || 'Permission needed';
     machine.enterPermission(detail);
     PermissionDialog.show(data, (decision) => {
+      if (decision === null) {
+        // Timeout with 'ignore' behavior: dismiss silently
+        machine.goIdle();
+        return;
+      }
       machine.permissionResolved(decision);
       window.electronAPI.sendPermissionResponse(data.requestId || '', decision);
     });
   });
+
+  // Receive config from main process
+  window.electronAPI.onConfig((config) => {
+    PermissionDialog.setConfig(config);
+  });
+
+  // ── Update checker events ──
+
+  // Show update dialog when new version is available
+  window.electronAPI.onUpdateAvailable((data) => {
+    pendingUpdateVersion = data.latestVersion;
+    UpdateDialog.show(data);
+  });
+
+  // Handle update result from main process
+  window.electronAPI.onUpdateResult((result) => {
+    if (result.success) {
+      SpeechBubble.show('✅ Updated! Restart pet to apply.');
+      setTimeout(() => UpdateDialog.hide(), 1500);
+    } else {
+      // Show error, let user dismiss
+      SpeechBubble.show('❌ ' + (result.message || 'Update failed'));
+      UpdateDialog.hide();
+    }
+  });
 }
+
+// ── UpdateDialog callbacks ──
+
+UpdateDialog.onUpdate = () => {
+  window.electronAPI.sendUpdateAction({ action: 'update' });
+};
+
+UpdateDialog.onSkip = () => {
+  window.electronAPI.sendUpdateAction({ action: 'skip', version: pendingUpdateVersion });
+};
+
+// PermissionDialog timeout handler — dialog auto-dismissed, pet goes idle
+PermissionDialog.onTimeout = () => {
+  machine.goIdle();
+};
 
 function showPermissionDialog(request) {
   return new Promise((resolve) => {

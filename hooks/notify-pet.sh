@@ -5,7 +5,7 @@
 ACTION="$1"
 PLUGIN_ROOT="${2:-$(dirname "$(dirname "$0")")}"
 PORT_FILE="$HOME/.claude-pet/port"
-PORT=$(cat "$PORT_FILE" 2>/dev/null)
+PORT=$(head -n 1 "$PORT_FILE" 2>/dev/null)
 
 if [ -z "$PORT" ]; then
   exit 0  # Pet not running, silently skip
@@ -16,7 +16,7 @@ BASE_URL="http://127.0.0.1:$PORT"
 case "$ACTION" in
   tool-start)
     # Claude Code passes tool_name via stdin JSON
-    TOOL_NAME=$(python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name',''))" 2>/dev/null || echo "")
+    TOOL_NAME=$(node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).tool_name||'')}catch(e){console.log('')}})" 2>/dev/null || echo "")
     # Map tool name to state
     STATE=""
     case "$TOOL_NAME" in
@@ -41,7 +41,7 @@ case "$ACTION" in
     ;;
 
   tool-fail)
-    TOOL_NAME=$(python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_name','unknown'))" 2>/dev/null || echo "unknown")
+    TOOL_NAME=$(node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).tool_name||'unknown')}catch(e){console.log('unknown')}})" 2>/dev/null || echo "unknown")
     curl -s -X POST "$BASE_URL/status" \
       -H "Content-Type: application/json" \
       -d "{\"state\":\"error\",\"detail\":\"$TOOL_NAME failed\"}" > /dev/null 2>&1 &
@@ -62,70 +62,98 @@ case "$ACTION" in
 
   permission-request)
     # PermissionRequest hook — blocking, returns allow/deny to Claude Code
-    python3 - "$BASE_URL" <<'PY'
-import json, os, sys, time, uuid, urllib.error, urllib.request
+    # Save stdin JSON to temp file (heredoc replaces stdin, so we capture it first)
+    HOOK_INPUT_FILE="$HOME/.claude-pet/hook-input-$$.json"
+    mkdir -p "$HOME/.claude-pet" 2>/dev/null
+    cat > "$HOOK_INPUT_FILE"
+    node - "$BASE_URL" "$HOOK_INPUT_FILE" <<'JS'
+const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
 
-base_url = sys.argv[1]
-port_file = os.path.expanduser("~/.claude-pet/port")
-response_file = os.path.expanduser("~/.claude-pet/permission-response")
+(async () => {
+  const baseUrl = process.argv[2];
+  const inputFile = process.argv[3];
+  const portFile = path.join(os.homedir(), '.claude-pet', 'port');
+  const responseFile = path.join(os.homedir(), '.claude-pet', 'permission-response');
 
-try:
-    hook_input = json.load(sys.stdin)
-except json.JSONDecodeError:
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Invalid hook input"}}}))
-    sys.exit(0)
+  // Read hook input from temp file
+  let hookInput;
+  try {
+    hookInput = JSON.parse(fs.readFileSync(inputFile, 'utf8'));
+    fs.unlinkSync(inputFile);
+  } catch (e) {
+    try { fs.unlinkSync(inputFile); } catch (_) {}
+    console.log(JSON.stringify({hookSpecificOutput: {hookEventName: 'PermissionRequest', decision: {behavior: 'deny', message: 'Invalid hook input'}}}));
+    process.exit(0);
+  }
 
-try:
-    port = open(port_file).read().strip()
-except OSError:
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Pet not running"}}}))
-    sys.exit(0)
+  // Check pet is running
+  let port;
+  try { port = fs.readFileSync(portFile, 'utf8').split('\n')[0].trim(); } catch (e) {
+    console.log(JSON.stringify({hookSpecificOutput: {hookEventName: 'PermissionRequest', decision: {behavior: 'deny', message: 'Pet not running'}}}));
+    process.exit(0);
+  }
 
-request_id = str(uuid.uuid4())
-payload = {
-    "requestId": request_id,
-    "tool_name": hook_input.get("tool_name"),
-    "tool_input": hook_input.get("tool_input"),
-    "permission_suggestions": hook_input.get("permission_suggestions", []),
-    "title": hook_input.get("title"),
-    "message": hook_input.get("message"),
-    "cwd": hook_input.get("cwd"),
-    "permission_mode": hook_input.get("permission_mode"),
-}
+  const requestId = crypto.randomUUID();
+  const payload = JSON.stringify({
+    requestId,
+    tool_name: hookInput.tool_name,
+    tool_input: hookInput.tool_input,
+    permission_suggestions: hookInput.permission_suggestions || [],
+    title: hookInput.title,
+    message: hookInput.message,
+    cwd: hookInput.cwd,
+    permission_mode: hookInput.permission_mode,
+  });
 
-body = json.dumps(payload).encode("utf-8")
-req = urllib.request.Request(
-    f"{base_url}/permission",
-    data=body,
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
+  // POST /permission
+  const posted = await new Promise((resolve) => {
+    const [host, portStr] = baseUrl.replace('http://', '').split(':');
+    const req = http.request({
+      hostname: host || '127.0.0.1',
+      port: parseInt(portStr) || port,
+      path: '/permission',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 5000,
+    }, (res) => {
+      let b = ''; res.on('data', c => b += c);
+      res.on('end', () => resolve(true));
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.write(payload);
+    req.end();
+  });
 
-try:
-    urllib.request.urlopen(req, timeout=5)
-except urllib.error.URLError:
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Pet unreachable"}}}))
-    sys.exit(0)
+  if (!posted) {
+    console.log(JSON.stringify({hookSpecificOutput: {hookEventName: 'PermissionRequest', decision: {behavior: 'deny', message: 'Pet unreachable'}}}));
+    process.exit(0);
+  }
 
-deadline = time.time() + 600
-while time.time() < deadline:
-    if os.path.exists(response_file):
-        try:
-            with open(response_file, "r", encoding="utf-8") as f:
-                resp = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            resp = None
-        if resp and resp.get("requestId") == request_id:
-            try:
-                os.remove(response_file)
-            except OSError:
-                pass
-            decision = resp.get("decision") or {"behavior": "deny"}
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}))
-            sys.exit(0)
-    time.sleep(0.1)
+  // Poll for response (600s timeout, 100ms interval)
+  const deadline = Date.now() + 600000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 100));
+    try {
+      const raw = fs.readFileSync(responseFile, 'utf8');
+      const resp = JSON.parse(raw);
+      if (resp && resp.requestId === requestId) {
+        try { fs.unlinkSync(responseFile); } catch (_) {}
+        const decision = resp.decision || { behavior: 'deny' };
+        console.log(JSON.stringify({hookSpecificOutput: {hookEventName: 'PermissionRequest', decision}}));
+        process.exit(0);
+      }
+    } catch (e) {}
+  }
 
-print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "Permission timeout"}}}))
-PY
+  console.log(JSON.stringify({hookSpecificOutput: {hookEventName: 'PermissionRequest', decision: {behavior: 'deny', message: 'Permission timeout'}}}));
+})();
+JS
+    # Clean up temp file if still exists (e.g. if node failed to start)
+    rm -f "$HOOK_INPUT_FILE"
     ;;
 esac

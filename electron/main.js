@@ -9,6 +9,20 @@ const os = require('os');
 const PORT_FILE = path.join(os.homedir(), '.claude-pet', 'port');
 const POSITION_FILE = path.join(os.homedir(), '.claude-pet', 'position.json');
 const AUTO_START_FILE = path.join(os.homedir(), '.claude-pet', 'auto-start-disabled');
+const CONFIG_FILE = path.join(os.homedir(), '.claude-pet', 'config.json');
+
+// Plugin root is electron/../ = the repo root
+const PLUGIN_ROOT = path.dirname(__dirname);
+const updateChecker = require('./update-checker');
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    }
+  } catch (_) {}
+  return {};
+}
 
 function createPetWindow() {
   petWindow = new BrowserWindow({
@@ -127,16 +141,28 @@ function startHttpServer() {
       return;
     }
 
+    if (req.method === 'POST' && req.url === '/shutdown') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ status: 'shutting down' }));
+      app.quit();
+      return;
+    }
+
     res.writeHead(404);
     res.end('not found');
+  });
+
+  httpServer.on('error', (err) => {
+    console.error('Claude Pet HTTP server error:', err.message);
+    try { fs.unlinkSync(PORT_FILE); } catch (_) {}
   });
 
   httpServer.listen(0, '127.0.0.1', () => {
     const port = httpServer.address().port;
     const dir = path.dirname(PORT_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(PORT_FILE, String(port));
-    console.log(`Claude Pet HTTP server on 127.0.0.1:${port}`);
+    fs.writeFileSync(PORT_FILE, `${port}\n${process.pid}`);
+    console.log(`Claude Pet HTTP server on 127.0.0.1:${port} (pid ${process.pid})`);
   });
 }
 
@@ -158,18 +184,78 @@ ipcMain.on('window-dragged', () => {
   savePosition();
 });
 
+// ── Version update check ──
+
+async function checkAndNotify() {
+  if (!updateChecker.shouldCheck()) return;
+  try {
+    const result = await updateChecker.checkForUpdates(PLUGIN_ROOT);
+    updateChecker.recordCheck();
+    if (result.hasUpdate && petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send('update-available', {
+        currentVersion: result.currentVersion,
+        latestVersion: result.latestVersion,
+        releaseNotes: result.releaseNotes,
+        releaseUrl: result.releaseUrl
+      });
+    }
+  } catch (_) {
+    // Silently ignore check failures — don't bother the user
+  }
+}
+
+// IPC: update action from renderer
+ipcMain.on('update-action', async (event, payload) => {
+  const action = payload && payload.action;
+
+  if (action === 'update') {
+    try {
+      const result = await updateChecker.runUpdate(PLUGIN_ROOT);
+      event.reply('update-result', result);
+    } catch (err) {
+      event.reply('update-result', { success: false, message: err.message });
+    }
+  } else if (action === 'skip' && payload.version) {
+    // Mark the specified version as skipped so we don't re-prompt
+    try {
+      const stateFile = path.join(os.homedir(), '.claude-pet', 'version.json');
+      let state = {};
+      if (fs.existsSync(stateFile)) {
+        state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      }
+      state.lastCheck = new Date().toISOString();
+      state.skippedVersion = payload.version;
+      fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+    } catch (_) {}
+  }
+});
+
 app.whenReady().then(() => {
   createPetWindow();
   startHttpServer();
   setupTray();
-  // Apply saved position after window is shown
+  // Apply saved position and send config after window is shown
   petWindow.webContents.on('did-finish-load', () => {
     applyPosition();
+    const config = loadConfig();
+    petWindow.webContents.send('config', config);
+
+    // Start version update checker
+    // First check after 60s to avoid slowing down startup
+    setTimeout(() => checkAndNotify(), 60000);
+    // Then check every 30 minutes (shouldCheck() enforces 24h minimum interval)
+    setInterval(() => checkAndNotify(), 30 * 60 * 1000);
   });
 });
 
-app.on('window-all-closed', () => {
+app.on('before-quit', () => {
+  // Clean up IPC files on any exit path
+  try { fs.unlinkSync(PORT_FILE); } catch (_) {}
+  try { fs.unlinkSync(path.join(os.homedir(), '.claude-pet', 'permission-response')); } catch (_) {}
   if (httpServer) httpServer.close();
+});
+
+app.on('window-all-closed', () => {
   app.quit();
 });
 

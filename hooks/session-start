@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # Auto-launch the Electron pet app on Claude Code session start
-PLUGIN_ROOT="$(dirname "$(dirname "$0")")"
+# Usage: session-start [plugin_root]
+# plugin_root is passed from hooks.json via ${CLAUDE_PLUGIN_ROOT}
+PLUGIN_ROOT="${1:-$(dirname "$(dirname "$0")")}"
 ELECTRON_DIR="$PLUGIN_ROOT/electron"
 PORT_FILE="$HOME/.claude-pet/port"
 
 # If pet is already running, skip
 if [ -f "$PORT_FILE" ]; then
-  PORT=$(cat "$PORT_FILE")
-  if curl -s "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; then
+  PORT=$(head -n 1 "$PORT_FILE" 2>/dev/null)
+  if [ -n "$PORT" ] && curl -s "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; then
     exit 0
+  fi
+  # Health check failed — check if the process is still alive
+  PID=$(sed -n '2p' "$PORT_FILE" 2>/dev/null)
+  if [ -n "$PID" ] && ! kill -0 "$PID" 2>/dev/null; then
+    # PID is dead, clean up stale port file
+    rm -f "$PORT_FILE"
   fi
 fi
 
@@ -23,5 +31,10 @@ if [ ! -d "$ELECTRON_DIR/node_modules" ]; then
 fi
 
 # Launch Electron in background
-cd "$ELECTRON_DIR"
-npx electron . > /dev/null 2>&1 &
+# Unset ELECTRON_RUN_AS_NODE — some environments set this, which forces
+# Electron to run as plain Node.js, breaking the pet window.
+(
+  unset ELECTRON_RUN_AS_NODE
+  cd "$ELECTRON_DIR"
+  npx electron . > /dev/null 2>&1 &
+)

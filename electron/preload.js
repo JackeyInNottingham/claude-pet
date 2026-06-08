@@ -12,6 +12,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onCommand: (callback) => {
     ipcRenderer.on('command', (_event, data) => callback(data));
+  },
+  onConfig: (callback) => {
+    ipcRenderer.on('config', (_event, data) => callback(data));
+  },
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-available', (_event, data) => callback(data));
+  },
+  onUpdateResult: (callback) => {
+    ipcRenderer.on('update-result', (_event, data) => callback(data));
+  },
+  sendUpdateAction: (payload) => {
+    ipcRenderer.send('update-action', payload);
   }
 });
 

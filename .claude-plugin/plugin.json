@@ -1,26 +1,95 @@
 {
   "name": "claude-pet",
+  "version": "1.0.0",
   "description": "Desktop pet that shows Claude Code's running status with a cute pixel-art mascot. Reflects real-time states like reading, writing, executing, and handles permission requests through an interactive dialog.",
   "author": {
-    "name": "Jiyao Fei",
-    "email": ""
+    "name": "Jiyao Fei"
   },
-  "homepage": "",
-  "repository": "",
+  "homepage": "https://github.com/jiyaofei/claude-pet",
   "license": "MIT",
-  "keywords": ["desktop-pet", "status", "ui", "fun"],
-  "hooks": "./hooks/",
-  "commands": "./commands/",
-  "interface": {
-    "displayName": "Claude Pet",
-    "shortDescription": "Cute desktop pet reflecting Claude Code status",
-    "longDescription": "A pixel-art desktop pet that lives on your screen and reflects Claude Code's real-time status through animations. See when Claude is reading, thinking, writing, or executing commands. Interactive permission dialog lets you approve or deny actions directly from the pet.",
-    "developerName": "Jiyao Fei",
-    "category": "UI",
-    "capabilities": ["Interactive", "Read"],
-    "brandColor": "#F59E0B",
-    "composerIcon": "",
-    "logo": "",
-    "screenshots": []
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-start \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-finish \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" tool-fail \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" idle \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" permission-notify \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js\" permission-request \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\" \"${CLAUDE_PLUGIN_ROOT}\""
+          }
+        ]
+      }
+    ]
+  },
+  "commands": {
+    "pet": {
+      "description": "Control the Claude Pet desktop companion — start, stop, toggle, or check status",
+      "source": "./commands/pet.md"
+    }
   }
 }
