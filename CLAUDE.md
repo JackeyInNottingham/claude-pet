@@ -186,6 +186,50 @@ PermissionRequest（阻塞式）：
 
 Hook 定义在 **两个文件** 中重复出现：[hooks/hooks.json](hooks/hooks.json) 和 [.claude-plugin/plugin.json](.claude-plugin/plugin.json)。修改 Hook 时必须**同步更新两处**，否则会出现不一致。
 
+### 版本管理
+
+**[VERSION](VERSION) 是唯一的权威版本号来源。** 它只是一个纯文本文件，包含一行版本号（如 `0.1.1`）。所有构建脚本和 CI 流水线都从这里读取。
+
+**同步关系：**
+
+- `VERSION` → 构建时自动同步到 `.claude-plugin/plugin.json` (`version` 字段)
+- `VERSION` → 构建时自动同步到 `electron/package.json` (`version` 字段)
+- `update-checker.js` 优先读 `VERSION`，依次 fallback 到 `plugin.json`、`package.json`
+
+**版本号规则（手动判断）：**
+
+```
+MAJOR.MINOR.PATCH
+  │     │     │
+  │     │     └─ PATCH: bug 修复，每次 +1，MINOR 和 MAJOR 不变
+  │     │        例: 0.1.1 → 0.1.2
+  │     │
+  │     └─ MINOR: 新功能，每次 +1，PATCH 归零
+  │        例: 0.1.2 → 0.2.0
+  │
+  └─ MAJOR: 稳定版发布，架构大改，每次 +1，MINOR 和 PATCH 归零
+      例: 0.2.0 → 1.0.0
+```
+
+**发布流程：**
+
+```bash
+# 1. 判断本次改动的类型，更新 VERSION
+echo "0.1.2" > VERSION
+
+# 2. 提交版本号变更
+git add VERSION && git commit -m "chore: bump version to 0.1.2"
+
+# 3. 打 tag（注意加 v 前缀）
+git tag v0.1.2
+
+# 4. 推送
+git push && git push --tags
+# CI 自动构建 4 个平台的预打包 Release
+```
+
+> **判断原则：** Claude 在每次改动后自动判断是否需要 bump 版本以及 bump 哪一位。纯 bug 修复 bump PATCH，新增功能/文件 bump MINOR，稳定版发布 bump MAJOR。不确定时可以在提交信息中说明理由。
+
 ### 版本自动更新检查
 
 [electron/update-checker.js](electron/update-checker.js)（主进程，纯 Node.js 内置模块）在窗口加载 60 秒后首次检查，之后每 30 分钟轮询一次，由 `shouldCheck()` 根据 `~/.claude-pet/version.json` 中的 `lastCheck` 时间戳强制 24 小时间隔。

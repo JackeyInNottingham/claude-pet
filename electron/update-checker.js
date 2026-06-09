@@ -86,12 +86,19 @@ function getAssetExt() {
 // ── Version source ──
 
 function getLocalVersion(pluginRoot) {
+  // 1. VERSION file (canonical)
+  try {
+    const versionFile = path.join(pluginRoot, 'VERSION');
+    const v = fs.readFileSync(versionFile, 'utf8').trim().split('\n')[0];
+    if (v && /^\d+\.\d+\.\d+/.test(v)) return v;
+  } catch (_) {}
+  // 2. plugin.json
   try {
     const pluginJson = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
     const data = JSON.parse(fs.readFileSync(pluginJson, 'utf8'));
     return data.version || '0.0.0';
   } catch (_) {
-    // Fallback: try reading electron package.json
+    // 3. electron package.json
     try {
       const pkgJson = path.join(pluginRoot, 'electron', 'package.json');
       const data = JSON.parse(fs.readFileSync(pkgJson, 'utf8'));

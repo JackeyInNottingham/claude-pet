@@ -12,12 +12,27 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
-# ── Detect version ──
+# ── Detect version (VERSION file is canonical) ──
 if [ $# -ge 1 ]; then
   VERSION="$1"
+elif [ -f "$REPO_ROOT/VERSION" ]; then
+  VERSION=$(head -n 1 "$REPO_ROOT/VERSION" | tr -d '[:space:]')
 else
   VERSION=$(node -e "console.log(require('./.claude-plugin/plugin.json').version)" 2>/dev/null || echo "0.0.0")
 fi
+
+# Sync VERSION → plugin.json / package.json during package
+echo "$VERSION" > "$REPO_ROOT/VERSION"
+node -e "
+  const fs = require('fs');
+  const p = JSON.parse(fs.readFileSync('.claude-plugin/plugin.json','utf8'));
+  p.version = '$VERSION';
+  fs.writeFileSync('.claude-plugin/plugin.json', JSON.stringify(p, null, 2) + '\n');
+  const e = JSON.parse(fs.readFileSync('electron/package.json','utf8'));
+  e.version = '$VERSION';
+  fs.writeFileSync('electron/package.json', JSON.stringify(e, null, 2) + '\n');
+  console.log('Synced version $VERSION to plugin.json and package.json');
+" 2>/dev/null || true
 
 # ── Detect platform / arch ──
 PLATFORM=$(node -e "console.log(process.platform)" 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')
