@@ -101,8 +101,23 @@ function Install-ElectronDeps {
     Push-Location "$InstallDir\electron"
 
     try {
-        if ($UseCnMirror) {
-            Write-Warn "Using npmmirror Electron mirror"
+        # Auto-detect China network (same logic as install.sh)
+        $cnDetected = $UseCnMirror
+        if (-not $cnDetected) {
+            try {
+                $conn = Test-Connection -ComputerName npmmirror.com -Count 1 -TimeToLive 32 -ErrorAction Stop
+                if ($conn.Status -eq 'Success') { $cnDetected = $true }
+            } catch {
+                # Fallback: try TCP to port 443
+                try {
+                    $tcp = New-Object System.Net.Sockets.TcpClient
+                    if ($tcp.ConnectAsync('npmmirror.com', 443).Wait(3000)) { $cnDetected = $true }
+                    $tcp.Close()
+                } catch {}
+            }
+        }
+        if ($cnDetected) {
+            Write-Warn "Detected potential China network. Using npmmirror Electron mirror."
             $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
         }
 
