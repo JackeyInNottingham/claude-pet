@@ -1,17 +1,29 @@
 # Claude Pet Installer — Windows (PowerShell)
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1
 # Or:    iwr -UseBasicParsing https://raw.githubusercontent.com/JackeyInNottingham/claude-pet/main/install.ps1 | iex
+#
+# Parameters:
+#   -UseCnMirror       Use npmmirror for Electron (git+npm fallback path only)
+#   -ForceGit           Skip release download, force git clone + npm install
+#   -EnableAutoStart    Enable auto-start without prompting
+#   -SkipPrereqCheck    Skip prerequisite checks (not recommended)
+#   -GhProxy <url>      GitHub download proxy, e.g. "https://ghproxy.com/"
 
 param(
     [switch]$SkipPrereqCheck,
     [switch]$UseCnMirror,
-    [switch]$EnableAutoStart
+    [switch]$ForceGit,
+    [switch]$EnableAutoStart,
+    [string]$GhProxy
 )
 
 $ErrorActionPreference = "Stop"
 
-$RepoUrl = "https://github.com/JackeyInNottingham/claude-pet.git"
+$RepoOwner = "JackeyInNottingham"
+$RepoName = "claude-pet"
+$RepoUrl = "https://github.com/$RepoOwner/$RepoName.git"
 $InstallDir = "$env:USERPROFILE\.claude\skills\claude-pet"
+$DataDir = "$env:USERPROFILE\.claude-pet"
 
 # ── Helpers ──
 function Write-Banner {
@@ -25,11 +37,23 @@ function Write-Info  { Write-Host "  ✓ $args" -ForegroundColor Green }
 function Write-Warn  { Write-Host "  ⚠ $args" -ForegroundColor Yellow }
 function Write-Error { Write-Host "  ✗ $args" -ForegroundColor Red; exit 1 }
 
+# ── Platform detection ──
+function Get-PlatformInfo {
+    $plat = "win32"
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "ia32" }
+    # Normalize arm64 detection (PowerShell 7+ / Windows on ARM)
+    try {
+        $envArch = $env:PROCESSOR_ARCHITECTURE
+        if ($envArch -match "ARM64") { $arch = "arm64" }
+    } catch {}
+    return @{ Platform = $plat; Arch = $arch }
+}
+
 # ── Check prerequisites ──
 function Check-Prereqs {
     Write-Host "Checking prerequisites..." -ForegroundColor Cyan
 
-    # Node.js
+    # Node.js (always needed)
     $node = Get-Command node -ErrorAction SilentlyContinue
     if (-not $node) {
         Write-Error "Node.js not found. Install Node.js 18+ from https://nodejs.org"
@@ -39,20 +63,6 @@ function Check-Prereqs {
         Write-Error "Node.js $nodeVer detected. Claude Pet requires Node.js 18+."
     }
     Write-Info "Node.js $(node -v)"
-
-    # npm
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
-    if (-not $npm) {
-        Write-Error "npm not found. It should come with Node.js."
-    }
-    Write-Info "npm $(npm -v)"
-
-    # Git
-    $git = Get-Command git -ErrorAction SilentlyContinue
-    if (-not $git) {
-        Write-Error "Git not found. Install from https://git-scm.com"
-    }
-    Write-Info "git $(git --version | ForEach-Object { $_ -replace 'git version ', '' })"
 
     # Claude CLI
     $claude = Get-Command claude -ErrorAction SilentlyContinue
@@ -66,8 +76,126 @@ function Check-Prereqs {
     }
 }
 
-# ── Clone / update repository ──
+# ── Release download install ──
+function Install-FromRelease {
+    param($Platform, $Arch)
+
+    Write-Host ""
+    Write-Host "Fetching latest release information..." -ForegroundColor Cyan
+
+    $apiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+    $releaseJson = $null
+
+    try {
+        $response = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+        $releaseJson = $response.Content | ConvertFrom-Json
+    } catch {
+        Write-Warn "Could not reach GitHub API: $_"
+        return $false
+    }
+
+    $tag = $releaseJson.tag_name
+    if (-not $tag) {
+        Write-Warn "Could not parse latest release tag from API."
+        return $false
+    }
+    Write-Info "Latest release: $tag"
+
+    # Build asset name: claude-pet-v0.1.0-win32-x64.zip
+    $assetName = "claude-pet-${tag}-${Platform}-${Arch}.zip"
+
+    # Find the download URL from assets
+    $downloadUrl = $null
+    foreach ($asset in $releaseJson.assets) {
+        if ($asset.name -eq $assetName) {
+            $downloadUrl = $asset.browser_download_url
+            break
+        }
+    }
+
+    if (-not $downloadUrl) {
+        Write-Warn "No pre-built package found for ${Platform}-${Arch} (looked for: $assetName)"
+        Write-Warn "Falling back to git clone + npm install..."
+        return $false
+    }
+
+    # Apply proxy if configured
+    if ($GhProxy) {
+        $downloadUrl = "$GhProxy$downloadUrl"
+        Write-Info "Using proxy: $GhProxy"
+    }
+
+    # Download
+    Write-Host ""
+    Write-Host "Downloading pre-built package..." -ForegroundColor Cyan
+    Write-Host "  $assetName"
+
+    $tmpFile = Join-Path $env:TEMP "claude-pet-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).zip"
+
+    try {
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
+        $ProgressPreference = 'Continue'
+    } catch {
+        Write-Warn "Download failed: $_"
+        Remove-Item $tmpFile -ErrorAction SilentlyContinue
+        Write-Warn "Falling back to git clone + npm install..."
+        return $false
+    }
+
+    Write-Info "Download complete ($([math]::Round((Get-Item $tmpFile).Length / 1MB, 1)) MB)"
+
+    # Prepare install directory
+    if (Test-Path $InstallDir) {
+        $backup = "$InstallDir.bak"
+        Write-Warn "$InstallDir exists. Backing up to $backup"
+        Remove-Item $backup -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item $InstallDir $backup
+    }
+    $null = New-Item -ItemType Directory -Force -Path $InstallDir
+
+    # Extract
+    Write-Host "Extracting..." -ForegroundColor Cyan
+    try {
+        Expand-Archive -Path $tmpFile -DestinationPath $InstallDir -Force
+
+        # Fix: asset extracts to claude-pet/ subdir, move contents up
+        $subDir = Join-Path $InstallDir "claude-pet"
+        if (Test-Path $subDir) {
+            Get-ChildItem $subDir | Move-Item -Destination $InstallDir -Force
+            Remove-Item $subDir -Recurse -Force
+        }
+    } catch {
+        Write-Warn "Extraction failed: $_"
+        Remove-Item $tmpFile -ErrorAction SilentlyContinue
+        Write-Warn "Falling back to git clone + npm install..."
+        return $false
+    }
+
+    Remove-Item $tmpFile -ErrorAction SilentlyContinue
+
+    # Verify
+    $electronExe = Join-Path $InstallDir "electron\node_modules\electron\dist\electron.exe"
+    if (-not (Test-Path $electronExe)) {
+        Write-Warn "Electron binary not found in package: $electronExe"
+        Write-Warn "Falling back to git clone + npm install..."
+        return $false
+    }
+
+    Write-Info "Extracted to $InstallDir"
+    Write-Info "Electron binary verified"
+    return $true
+}
+
+# ── Clone / update repository (fallback) ──
 function Install-Repo {
+    # Git only needed for fallback
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Write-Error "Git not found. Install from https://git-scm.com"
+    }
+    Write-Info "git $(git --version | ForEach-Object { $_ -replace 'git version ', '' })"
+
     if (Test-Path "$InstallDir\.git") {
         Write-Host ""
         Write-Host "Repository exists, updating..." -ForegroundColor Cyan
@@ -94,7 +222,7 @@ function Install-Repo {
     }
 }
 
-# ── Electron dependencies ──
+# ── Electron dependencies (fallback) ──
 function Install-ElectronDeps {
     Write-Host ""
     Write-Host "Installing Electron dependencies..." -ForegroundColor Cyan
@@ -175,7 +303,7 @@ function Post-Install {
     Write-Host "    cd $InstallDir\electron`; npm start" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  To update later:"
-    Write-Host "    cd $InstallDir`; git pull`; cd electron`; npm install" -ForegroundColor Cyan
+    Write-Host "    /pet stop && iwr -UseBasicParsing https://raw.githubusercontent.com/JackeyInNottingham/claude-pet/main/install.ps1 | iex" -ForegroundColor Cyan
     Write-Host ""
 
     if ($EnableAutoStart) {
@@ -199,7 +327,21 @@ function Post-Install {
 # ── Run ──
 Write-Banner
 Check-Prereqs
-Install-Repo
-Install-ElectronDeps
+
+$info = Get-PlatformInfo
+Write-Info "Detected platform: $($info.Platform)-$($info.Arch)"
+
+$releaseOk = $false
+if (-not $ForceGit) {
+    $releaseOk = Install-FromRelease -Platform $info.Platform -Arch $info.Arch
+} else {
+    Write-Info "ForceGit: using git clone + npm install"
+}
+
+if (-not $releaseOk) {
+    Install-Repo
+    Install-ElectronDeps
+}
+
 Install-Plugin
 Post-Install

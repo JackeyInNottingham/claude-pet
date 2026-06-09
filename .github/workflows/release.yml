@@ -1,0 +1,94 @@
+name: Release
+
+# Build and publish platform-specific release packages when a tag is pushed.
+# Each runner builds for its native platform + arch, so the Electron binary
+# inside node_modules/ is correct for that target.
+#
+# Trigger: git tag v0.1.0 && git push --tags
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # ── Build packages ──
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: macos-latest
+            label: darwin-arm64
+          - os: macos-13
+            label: darwin-x64
+          - os: windows-latest
+            label: win32-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Package release
+        shell: bash
+        run: bash scripts/package-release.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: dist/*
+
+  # ── Create GitHub Release & upload all artifacts ──
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Claude Pet ${{ github.ref_name }}"
+          body: |
+            ## Installation
+
+            ### macOS / Linux
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/JackeyInNottingham/claude-pet/${{ github.ref_name }}/install.sh | bash
+            ```
+
+            ### Windows (PowerShell)
+            ```powershell
+            iwr -UseBasicParsing https://raw.githubusercontent.com/JackeyInNottingham/claude-pet/${{ github.ref_name }}/install.ps1 | iex
+            ```
+
+            ---
+
+            ## What's included
+
+            Each platform package includes the Electron binary pre-installed in `electron/node_modules/`. No npm install needed — extract and run.
+
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          files: artifacts/*
+          generate_release_notes: true
