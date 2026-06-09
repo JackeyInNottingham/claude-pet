@@ -2,7 +2,7 @@
 
 ## 项目状态
 
-**2026-06-09**: 16 个 bug 全部修复。安装/卸载/本地安装脚本全部验证通过。桌宠在 Windows 上正常运行，健康检查 `{"status":"ok"}`。项目处于可发布状态。
+**2026-06-09**: v0.2.0 已发布。预打包 Release 流水线就绪，安装脚本支持一键下载（跳过 npm install）。CI 矩阵构建 3 个平台。版本管理体系（VERSION 文件 + sync-version.js）建立。
 
 ## 当前会话成果
 
@@ -13,6 +13,16 @@
 | 修复 bug | 16 个（#1–8 代码审查、#9–11 Windows 安装验证、#12–14 脚本完善、#15–16 管道/死代码） |
 | 功能新增 | 单实例互斥锁、崩溃韧性健康检查、共享工具模块、卸载/本地安装脚本 |
 | 验证通过 | `dev-install.ps1` 实际运行、`install.sh` 本地模拟、桌宠启动 + 健康检查 |
+
+## 2026-06-09 会话成果 (Release 流水线)
+
+| 类别 | 内容 |
+|------|------|
+| 新建文件 | `scripts/package-release.sh`、`scripts/sync-version.js`、`.github/workflows/release.yml`、`VERSION` |
+| 修改文件 | `install.sh`、`install.ps1`、`electron/update-checker.js`、`electron/package.json`、`CLAUDE.md`、`.gitignore` |
+| 功能新增 | 预打包 Release（3 平台）、版本管理体系（VERSION + sync-version）、安装脚本 Release 优先下载 + git/npm fallback、资产名模糊匹配、国内网络自动检测（install.ps1） |
+| CI/CD | GitHub Actions 矩阵构建 (linux-x64 / darwin-arm64 / win32-x64)、自动创建 Release、单平台失败不阻塞发布 |
+| Bug 修复 | 安装脚本 release asset 双层 zip 问题（CI artifact vs 真包）、macos-13 跑者稀缺阻塞 pipeline、Release job `needs: build` 永不触发 |
 
 ## 已完成
 
@@ -30,9 +40,14 @@
 - [x] **卸载脚本** — `uninstall.sh` / `uninstall.ps1`，停止桌宠、删除插件目录、可选保留数据
 - [x] **本地测试安装脚本** — `dev-install.sh` / `dev-install.ps1`，从本地源码安装，不依赖 GitHub
 - [x] **单实例互斥锁** — 原子文件锁（`~/.claude-pet/.launcher.lock`）防止多会话开启多个桌宠
-- [x] **共享工具模块** — `hooks/pet-utils.js`，消除 `session-start.js` / `pet-control.js` / `notify-pet.js` 之间的代码重复
-- [x] **崩溃韧性** — 权限轮询循环中每 3 秒健康检查，桌宠崩溃时立即返回 deny 而非等 600 秒超时
-- [x] **安装脚本增强** — 移除 `--production`、安装后验证 electron 二进制存在
+- [x] **共享工具模块** — `hooks/pet-utils.js`
+- [x] **崩溃韧性** — 权限轮询中每 3 秒健康检查
+- [x] **安装脚本增强** — 移除 `--production`、验证 electron 二进制
+- [x] **预打包 Release 流水线** — `scripts/package-release.sh` + CI 矩阵构建
+- [x] **Release 优先安装** — install.sh/ps1 自动检测平台，下载预打包包，失败回退 git+npm
+- [x] **版本管理体系** — VERSION 权威源 + sync-version.js 自动同步
+- [x] **资产模糊匹配** — 安装脚本容忍 Release 资产名偏差
+- [x] **国内网络自动检测** — install.ps1 补齐与 install.sh 一致的自动镜像
 
 ## 代码审查修复（2026-06-09）
 
@@ -79,6 +94,8 @@
 - [ ] 权限弹窗大内容时自动扩展窗口（可选）
 - [ ] `elicitation_dialog`（MCP 表单）支持（可选）
 - [ ] CI/CD 自动测试
+- [ ] macOS / Linux 实际安装测试
+- [ ] Intel Mac (darwin-x64) 预打包恢复
 
 ## 快速启动
 
