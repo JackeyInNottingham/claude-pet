@@ -129,9 +129,19 @@ install_from_release() {
   [ "$platform" = "win32" ] && ext="zip"
   local asset_name="claude-pet-${tag}-${platform}-${arch}.${ext}"
 
-  # Find the download URL from the assets array
+  # Find the download URL from the assets array (exact match first, then fuzzy)
   local download_url
   download_url=$(echo "$release_json" | grep -o '"browser_download_url": *"[^"]*'"${asset_name}"'[^"]*"' | head -1 | sed 's/.*"browser_download_url": *"\([^"]*\)"/\1/')
+
+  if [ -z "$download_url" ]; then
+    # Fuzzy fallback: match any asset containing platform-arch and the right extension
+    local fuzzy_match
+    fuzzy_match=$(echo "$release_json" | grep -o '"name": *"[^"]*'"${platform}-${arch}"'[^"]*\.'"${ext}"'"' | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+    if [ -n "$fuzzy_match" ]; then
+      warn "Found alternative asset: ${fuzzy_match}"
+      download_url=$(echo "$release_json" | grep -o '"browser_download_url": *"[^"]*'"${fuzzy_match}"'[^"]*"' | head -1 | sed 's/.*"browser_download_url": *"\([^"]*\)"/\1/')
+    fi
+  fi
 
   if [ -z "$download_url" ]; then
     warn "No pre-built package found for ${platform}-${arch} (looked for: ${asset_name})"

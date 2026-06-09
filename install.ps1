@@ -104,12 +104,22 @@ function Install-FromRelease {
     # Build asset name: claude-pet-v0.1.0-win32-x64.zip
     $assetName = "claude-pet-${tag}-${Platform}-${Arch}.zip"
 
-    # Find the download URL from assets
+    # Find the download URL from assets (exact match first, then fuzzy)
     $downloadUrl = $null
     foreach ($asset in $releaseJson.assets) {
         if ($asset.name -eq $assetName) {
             $downloadUrl = $asset.browser_download_url
             break
+        }
+    }
+    # Fuzzy fallback: match any asset containing platform-arch and .zip
+    if (-not $downloadUrl) {
+        foreach ($asset in $releaseJson.assets) {
+            if ($asset.name -match "${Platform}-${Arch}" -and $asset.name -match '\.zip$') {
+                Write-Warn "Found alternative asset: $($asset.name)"
+                $downloadUrl = $asset.browser_download_url
+                break
+            }
         }
     }
 
