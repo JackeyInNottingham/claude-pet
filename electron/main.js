@@ -7,6 +7,7 @@ let petWindow = null;
 let httpServer = null;
 const os = require('os');
 const PORT_FILE = path.join(os.homedir(), '.claude-pet', 'port');
+const LOCK_FILE = path.join(os.homedir(), '.claude-pet', '.launcher.lock');
 const POSITION_FILE = path.join(os.homedir(), '.claude-pet', 'position.json');
 const AUTO_START_FILE = path.join(os.homedir(), '.claude-pet', 'auto-start-disabled');
 const CONFIG_FILE = path.join(os.homedir(), '.claude-pet', 'config.json');
@@ -162,6 +163,8 @@ function startHttpServer() {
     const dir = path.dirname(PORT_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(PORT_FILE, `${port}\n${process.pid}`);
+    // Release launcher lock — pet is now ready to accept connections
+    try { fs.unlinkSync(LOCK_FILE); } catch (_) {}
     console.log(`Claude Pet HTTP server on 127.0.0.1:${port} (pid ${process.pid})`);
   });
 }
@@ -251,6 +254,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   // Clean up IPC files on any exit path
   try { fs.unlinkSync(PORT_FILE); } catch (_) {}
+  try { fs.unlinkSync(LOCK_FILE); } catch (_) {}
   try { fs.unlinkSync(path.join(os.homedir(), '.claude-pet', 'permission-response')); } catch (_) {}
   if (httpServer) httpServer.close();
 });

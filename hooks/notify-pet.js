@@ -23,11 +23,16 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const {
+  PET_DIR,
+  PORT_FILE,
+  getPort,
+  healthCheck,
+  postJSON,
+} = require('./pet-utils');
 
 const ACTION = process.argv[2];
-const PLUGIN_ROOT = process.argv[3] || path.dirname(path.dirname(__dirname));
-const PORT_FILE = path.join(os.homedir(), '.claude-pet', 'port');
-const PET_DIR = path.join(os.homedir(), '.claude-pet');
+const PLUGIN_ROOT = process.argv[3] || path.dirname(__dirname);
 
 // ── Helpers ──
 
@@ -42,33 +47,6 @@ function readStdin() {
     process.stdin.on('close', () => resolve(data));
     // Timeout: if no data within 500ms, resolve empty
     setTimeout(() => resolve(data), 500);
-  });
-}
-
-function getPort() {
-  try {
-    const raw = fs.readFileSync(PORT_FILE, 'utf8');
-    return parseInt(raw.split('\n')[0].trim(), 10) || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function postJSON(hostname, port, route, data, timeout = 3000) {
-  return new Promise((resolve) => {
-    const body = JSON.stringify(data);
-    const req = http.request({
-      hostname, port, path: route, method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      timeout,
-    }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body: b }));
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-    req.write(body);
-    req.end();
   });
 }
 
@@ -191,10 +169,30 @@ async function handlePermissionRequest() {
   }
 
   // Poll for response (600s timeout, 100ms interval)
+  // Also health-check the pet periodically: if it crashes during the wait,
+  // return deny immediately instead of waiting the full 600s.
   const responseFile = path.join(PET_DIR, 'permission-response');
   const deadline = Date.now() + 600000;
+  // Start counting from now — don't health-check immediately since pet was just confirmed alive
+  let lastHealthCheck = Date.now();
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 100));
+
+    // Health check every 3 seconds — if pet crashed, bail early
+    if (Date.now() - lastHealthCheck > 3000) {
+      lastHealthCheck = Date.now();
+      const alive = await healthCheck(port);
+      if (!alive) {
+        console.log(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PermissionRequest',
+            decision: { behavior: 'deny', message: 'Pet disconnected' },
+          },
+        }));
+        process.exit(0);
+      }
+    }
+
     try {
       const raw = fs.readFileSync(responseFile, 'utf8');
       const resp = JSON.parse(raw);

@@ -106,8 +106,16 @@ function Install-ElectronDeps {
             $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
         }
 
-        npm install --production
+        npm install
         Write-Info "Electron dependencies installed"
+
+        # Verify electron binary exists (the .exe, not the .cmd wrapper — launcher uses the real executable)
+        $electronExe = Join-Path $InstallDir "electron\node_modules\electron\dist\electron.exe"
+        if (-not (Test-Path $electronExe)) {
+            Write-Error "Electron binary not found after install: $electronExe"
+            # Write-Error calls exit 1 — unreachable past here
+        }
+        Write-Info "Electron binary verified"
     } finally {
         Pop-Location
     }

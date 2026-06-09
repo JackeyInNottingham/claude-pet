@@ -94,8 +94,16 @@ install_electron_deps() {
     export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
   fi
 
-  npm install --production
+  npm install
   info "Electron dependencies installed"
+
+  # Verify electron binary exists
+  if [ -f "$INSTALL_DIR/electron/node_modules/.bin/electron" ] || [ -f "$INSTALL_DIR/electron/node_modules/.bin/electron.cmd" ]; then
+    info "Electron binary verified"
+  else
+    error "Electron binary not found after install. Check npm install output above."
+    return 1
+  fi
 }
 
 # ── Validate plugin structure ──
@@ -140,7 +148,8 @@ post_install() {
   echo ""
 
   # Ask about auto-start
-  read -r -p "  Enable auto-start on Claude Code session launch? [Y/n] " REPLY
+  # read fails (exit 1) when piped via curl|bash (stdin at EOF); || true keeps set -e happy
+  read -r -p "  Enable auto-start on Claude Code session launch? [Y/n] " REPLY || true
   if [ "${REPLY:-y}" = "y" ] || [ "${REPLY:-y}" = "Y" ] || [ -z "$REPLY" ]; then
     rm -f "$HOME/.claude-pet/auto-start-disabled"
     info "Auto-start enabled"

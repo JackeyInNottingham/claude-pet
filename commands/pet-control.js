@@ -14,55 +14,24 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const {
+  PORT_FILE,
+  LOCK_FILE,
+  PET_DIR,
+  getPort,
+  healthCheck,
+  isPidAlive,
+  tryAcquireLock,
+  releaseLock,
+  httpGet,
+  httpPost,
+} = require('../hooks/pet-utils');
 
 const ACTION = process.argv[2];
-const PLUGIN_ROOT = process.argv[3] || path.dirname(path.dirname(__dirname));
+const PLUGIN_ROOT = process.argv[3] || path.dirname(__dirname);
 const ELECTRON_DIR = path.join(PLUGIN_ROOT, 'electron');
-const PORT_FILE = path.join(os.homedir(), '.claude-pet', 'port');
 const AUTO_START_FILE = path.join(os.homedir(), '.claude-pet', 'auto-start-disabled');
-const PET_DIR = path.join(os.homedir(), '.claude-pet');
 const RESPONSE_FILE = path.join(PET_DIR, 'permission-response');
-
-// ── Helpers ──
-
-function httpGet(hostname, port, route) {
-  return new Promise((resolve) => {
-    const req = http.request({
-      hostname, port, path: route,
-      method: 'GET', timeout: 3000,
-    }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body: b }));
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-    req.end();
-  });
-}
-
-function httpPost(hostname, port, route) {
-  return new Promise((resolve) => {
-    const req = http.request({
-      hostname, port, path: route,
-      method: 'POST', timeout: 3000,
-    }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body: b }));
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-    req.end();
-  });
-}
-
-function getPort() {
-  try {
-    const raw = fs.readFileSync(PORT_FILE, 'utf8');
-    return parseInt(raw.split('\n')[0].trim(), 10) || null;
-  } catch (_) {
-    return null;
-  }
-}
 
 // ── Actions ──
 
@@ -81,31 +50,76 @@ async function startPet() {
     try { fs.unlinkSync(PORT_FILE); } catch (_) {}
   }
 
-  // Install deps if needed
+  // Acquire launcher lock to prevent duplicate pets
+  if (!tryAcquireLock()) {
+    console.log('Claude Pet is already starting (another launcher is active).');
+    process.exit(1);
+  }
+
+  // Install deps if needed (await — must complete before launching)
   if (!fs.existsSync(path.join(ELECTRON_DIR, 'node_modules'))) {
     console.log('Installing dependencies...');
     try {
       await new Promise((resolve, reject) => {
         const proc = spawn('npm', ['install', '--silent'], {
           cwd: ELECTRON_DIR, stdio: 'inherit',
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
+          env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')),
         });
         proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(`npm exit ${code}`)));
       });
+      console.log('Dependencies installed.');
     } catch (_) {
-      console.log('Warning: npm install failed. Dependencies may not be ready.');
+      console.log('Warning: npm install failed. Trying to launch anyway...');
     }
   }
 
+  // Resolve electron binary path.
+  // On Windows, use the actual .exe (the .cmd wrapper conflicts with detached:true).
+  const electronBin = process.platform === 'win32'
+    ? path.join(ELECTRON_DIR, 'node_modules', 'electron', 'dist', 'electron.exe')
+    : path.join(ELECTRON_DIR, 'node_modules', '.bin', 'electron');
+
   // Launch Electron
-  const child = spawn('npx', ['electron', '.'], {
-    cwd: ELECTRON_DIR,
-    stdio: 'ignore',
-    detached: true,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
-  });
-  child.unref();
-  console.log('Claude Pet started.');
+  let child;
+  try {
+    child = spawn(electronBin, ['.'], {
+      cwd: ELECTRON_DIR,
+      stdio: 'ignore',
+      detached: true,
+      env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')),
+    });
+    child.unref();
+  } catch (_) {
+    releaseLock();
+    console.log('Error: Could not launch Electron. Is it installed? Run: cd electron && npm install');
+    process.exit(1);
+  }
+
+  // Poll for Electron to write PORT_FILE, then release lock.
+  // Use a longer timeout (15s) to avoid race with slow startups.
+  // Also monitor child exit — if Electron crashes early, release lock immediately.
+  let attempts = 0;
+  while (attempts < 150) { // 15 seconds
+    await new Promise(r => setTimeout(r, 100));
+
+    // If Electron exited before writing PORT_FILE, bail
+    if (child.exitCode !== null || child.killed) {
+      releaseLock();
+      console.log('Error: Claude Pet failed to start.');
+      process.exit(1);
+    }
+
+    if (fs.existsSync(PORT_FILE)) {
+      releaseLock();
+      console.log('Claude Pet started.');
+      process.exit(0);
+    }
+    attempts++;
+  }
+
+  // Timeout: Electron is still starting, release lock
+  releaseLock();
+  console.log('Claude Pet started (startup in progress).');
 }
 
 async function stopPet() {
@@ -115,6 +129,7 @@ async function stopPet() {
     try { fs.unlinkSync(PORT_FILE); } catch (_) {}
   }
   try { fs.unlinkSync(RESPONSE_FILE); } catch (_) {}
+  releaseLock();
   console.log('Claude Pet stopped.');
 }
 

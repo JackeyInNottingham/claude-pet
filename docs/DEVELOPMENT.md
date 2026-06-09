@@ -59,6 +59,38 @@ Electron (electron/)
 | `/status` | POST | 更新工具状态 `{ state, detail }` |
 | `/permission` | POST | 触发权限弹窗（PermissionRequest 完整 payload） |
 | `/health` | GET | 健康检查 |
+| `/shutdown` | POST | 优雅关闭 Electron 应用 |
+
+### 2.1 单实例互斥锁
+
+防止多个 Claude Code 会话启动重复的桌宠进程。
+
+**锁文件：** `~/.claude-pet/.launcher.lock`（PID 写入文件，供过期检测）
+
+**流程：**
+
+```text
+session-start.js (或 /pet start)
+  ├─ 清理过期 port + lock 文件
+  ├─ tryAcquireLock() → fs.writeFileSync(lock, pid, 'wx')  原子创建
+  │   ├─ 成功 → 持有锁 → 继续
+  │   └─ EEXIST → 读 holder PID → isPidAlive?
+  │       ├─ 存活 → 另一个启动器进行中 → exit
+  │       └─ 已死 → 删锁 → 重试（最多 5 次）
+  ├─ 启动 Electron
+  └─ Electron main.js:
+      ├─ HTTP 服务启动 → 写 PORT_FILE → fs.unlinkSync(lock)  释放锁
+      └─ before-quit → 清理 PORT_FILE + lock
+```
+
+**关键设计点：**
+
+- `wx` flag 保证原子性（Unix: `O_EXCL`，Windows: `CREATE_NEW`）
+- 递归重试上限 5 次，防止损坏锁文件导致栈溢出
+- `session-start.js` 30 秒安全定时器（已 `.unref()`）兜底释放锁
+- `pet-control.js` 启动后轮询 PORT_FILE 最多 15 秒 + 监控 `child.exitCode`
+
+共享模块 `hooks/pet-utils.js` 提供 `tryAcquireLock()`/`releaseLock()`/`isPidAlive()`，被 `session-start.js`、`pet-control.js` 统一引用。
 
 ---
 
@@ -278,8 +310,12 @@ claude-pet/
 ├── .claude-plugin/plugin.json
 ├── CLAUDE.md                    # Claude Code 仓库工作指导
 ├── DEVLOG.md                    # 开发日志
+├── CONTRIBUTING.md
 ├── README.md / README.zh-CN.md
-├── install.sh / install.ps1     # 一键安装脚本
+├── LICENSE
+├── install.sh / install.ps1     # 一键安装脚本（从 GitHub）
+├── uninstall.sh / uninstall.ps1 # 卸载脚本
+├── dev-install.sh / dev-install.ps1  # 本地测试安装（不从云端）
 ├── commands/
 │   ├── pet.md                   # /pet 命令定义
 │   ├── pet-control.js           # 跨平台命令实现（Node.js）
@@ -287,21 +323,23 @@ claude-pet/
 │   └── pet-control.cmd          # Windows 启动器
 ├── hooks/
 │   ├── hooks.json               # Pre/Post/Notification/PermissionRequest
+│   ├── pet-utils.js             # 共享工具模块（lock/health/http）
 │   ├── notify-pet.js            # 主入口 — 纯 Node.js 跨平台 Hook
 │   ├── notify-pet.sh            # Unix 备选
 │   ├── notify-pet.cmd           # Windows 启动器
 │   ├── session-start.js         # 自动启动逻辑（Node.js）
 │   ├── session-start            # Unix 备选
 │   ├── session-start.cmd        # Windows 启动器
+│   ├── platform-shell.sh        # 跨平台 shell 检测（向后兼容）
 │   └── run-hook.cmd             # 向后兼容桥接器
 ├── electron/
-│   ├── main.js                  # Electron 入口 + HTTP 服务
+│   ├── main.js                  # Electron 入口 + HTTP 服务 + 锁释放
 │   ├── preload.js               # contextBridge IPC
 │   ├── renderer.js              # 10 FPS Canvas 动画循环
 │   ├── state-machine.js         # 10 状态 FSM
 │   ├── sprites.js               # Clawd 渲染 + PetAnimator
 │   ├── permission-format.js     # 权限文案/选项
-│   ├── permission-dialog.js     # 权限弹窗 UI
+│   ├── permission-dialog.js     # 权限弹窗 UI（含队列 + 超时）
 │   ├── update-checker.js        # 版本检查（GitHub API）
 │   ├── update-dialog.js         # 更新提示 UI
 │   ├── speech-bubble.js         # 工具状态气泡
@@ -367,8 +405,44 @@ claude-pet/
 | `notify-pet.js` | `notify-pet.sh` | 主入口，处理所有 Hook action |
 | `session-start.js` | `session-start` (bash) | 自动启动逻辑 |
 | `pet-control.js` | `pet-control.sh` | `/pet` 命令实现 |
+| `pet-utils.js` | — | 共享工具模块（lock/health/http） |
 
 原有的 `.sh` 脚本保留为 Unix 备选。**Windows 不再需要 Git Bash**，唯一硬依赖是 Node.js 18+。
+
+### 11.1 Windows Electron 启动路径
+
+Windows 上不能用 `node_modules/.bin/electron.cmd` + `detached: true`（EINVAL 错误）。必须直接调用真实的可执行文件：
+
+```javascript
+// pet-control.js / session-start.js 中的路径解析
+const electronBin = process.platform === 'win32'
+  ? path.join(ELECTRON_DIR, 'node_modules', 'electron', 'dist', 'electron.exe')
+  : path.join(ELECTRON_DIR, 'node_modules', '.bin', 'electron');
+```
+
+### 11.2 ELECTRON_RUN_AS_NODE 处理
+
+`ELECTRON_RUN_AS_NODE` 环境变量会导致 Electron 退化为纯 Node.js，`ipcMain` 等 API 不可用。**设为空字符串 `''` 无效**（Windows 上仍触发 Node 模式）。正确做法是**完全移除该变量**：
+
+```javascript
+// ✅ 正确：过滤掉 ELECTRON_RUN_AS_NODE
+env: Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => k !== 'ELECTRON_RUN_AS_NODE')
+)
+// ❌ 错误：设为空字符串
+env: { ...process.env, ELECTRON_RUN_AS_NODE: '' }
+```
+
+### 11.3 `path.dirname` 插件根目录解析
+
+`session-start.js`、`notify-pet.js` 在 `hooks/` 下，`pet-control.js` 在 `commands/` 下。插件根目录只需跳**一级**：
+
+```javascript
+// ✅ 正确
+const PLUGIN_ROOT = process.argv[2] || path.dirname(__dirname);
+// ❌ 错误（跳到了 skills/ 目录）
+const PLUGIN_ROOT = process.argv[2] || path.dirname(path.dirname(__dirname));
+```
 
 ---
 

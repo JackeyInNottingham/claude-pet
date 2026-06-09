@@ -90,7 +90,9 @@ Hook 定义在 [hooks/hooks.json](hooks/hooks.json) 和 [.claude-plugin/plugin.j
 node "${CLAUDE_PLUGIN_ROOT}/hooks/notify-pet.js" <action> "${CLAUDE_PLUGIN_ROOT}"
 ```
 
-Windows 额外提供 `.cmd` 启动器（`notify-pet.cmd`）作为备选。
+Hook 脚本共同依赖共享工具模块 **[hooks/pet-utils.js](hooks/pet-utils.js)**（纯 Node.js 内置模块），提供 `getPort`、`healthCheck`、`isPidAlive`、`tryAcquireLock`、`releaseLock`、`httpGet`/`httpPost`/`postJSON` 等函数，被 `notify-pet.js`、`session-start.js`、`pet-control.js` 统一引用，避免代码重复。
+
+Windows 额外提供 `.cmd` 启动器作为备选。
 
 | Hook 事件                                       | 行为                                                                                                                                                            |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -125,6 +127,8 @@ Windows 额外提供 `.cmd` 启动器（`notify-pet.cmd`）作为备选。
 **`permission-dialog.js`** — 权限弹窗的 DOM 控制器。通过 CSS 动画类（`is-open`、`waiting`、`hiding`、`hidden`）控制显示/隐藏。用户点击后通过回调返回 `decision` 对象。
 
 **`speech-bubble.js`** — 在宠物上方显示工具状态标签文本（如"Reading…"、"Writing code…"），持续 3 秒。
+
+**参考艺术文件** — `electron/` 下有多个 `.txt` 文件（`an-component.txt`、`extracted-art.txt`、`welcome-pixel-art.txt`、`welcome-back-art.txt`、`welcome-back-large.txt`），包含从 Claude Code 终端提取的 Clawd `An()` 组件原始定义和渲染参考。这些文件不在运行时使用，但理解 `sprites.js` 的像素渲染逻辑时需要参考。
 
 ### 通信流程
 
@@ -169,8 +173,10 @@ PermissionRequest（阻塞式）：
 
 | 配置项 | 默认值 | 说明 |
 | ------ | ------ | ---- |
-| `permissionTimeoutMs` | `30000` | 权限弹窗自动超时时间（毫秒） |
+| `permissionTimeoutMs` | `30000` | 权限弹窗 **UI 侧**自动关闭超时（毫秒），由 `permission-dialog.js` 消费 |
 | `timeoutBehavior` | `"allow"` | 超时行为：`"allow"` / `"deny"` / `"ignore"`（关闭弹窗不回复） |
+
+> **注意区分两套超时：** 上表是 UI 弹窗的自动关闭超时。Hook 侧（`notify-pet.js`）另有一个硬编码的 **600 秒**轮询超时（`deadline`），超过此时间未收到用户决定则返回 `deny`。两者独立工作——弹窗可能先关闭，但 Hook 侧继续等待；反之 Hook 侧到 600 秒上限也会强制返回。
 
 ### 权限弹窗队列
 
@@ -215,31 +221,44 @@ Hook 定义在 **两个文件** 中重复出现：[hooks/hooks.json](hooks/hooks
 
 | 操作 | 实现 |
 | ---- | ---- |
-| `start` | 检查 `port` 文件健康状态，若过期则清理；按需 `npm install`；`npx electron .` 启动（**必须先 `unset ELECTRON_RUN_AS_NODE`**） |
+| `start` | 检查 `port` 文件健康状态，若过期则清理；按需 `npm install`；直接调用 `electron.exe`（Windows）或 `.bin/electron`（Unix）启动（**自动过滤 `ELECTRON_RUN_AS_NODE`**） |
 | `stop` | 向 `/shutdown` 发送 POST 请求优雅关闭，清理 `port` 和 `permission-response` 文件 |
 | `toggle` | 创建/删除 `~/.claude-pet/auto-start-disabled` 文件 |
 | `status` | 通过 `/health` 端点检查 Electron 进程是否存活 |
 
 ### 跨平台设计（Node.js 纯内置模块）
 
-所有 Hook 脚本和命令处理均使用 **纯 Node.js** 实现，仅依赖内置模块（`http`、`fs`、`path`、`os`、`crypto`、`child_process`）：
+**⚠️ 关键约束：所有 Hook 脚本和命令处理脚本必须仅使用 Node.js 内置模块**（`http`、`fs`、`path`、`os`、`crypto`、`child_process`）。不得引入 npm 包——这是跨平台零依赖运行的基础。修改 `notify-pet.js`、`session-start.js`、`pet-control.js` 时必须遵守此约束。
+
+当前实现：
 
 | 脚本 | 替代 | 平台 |
 | ---- | ---- | ---- |
 | [hooks/notify-pet.js](hooks/notify-pet.js) | notify-pet.sh | 主入口，`node .../notify-pet.js <action>` |
 | [hooks/notify-pet.cmd](hooks/notify-pet.cmd) | — | Windows `.cmd` 启动器（2 行，转发到 .js） |
+| [hooks/pet-utils.js](hooks/pet-utils.js) | — | **共享工具模块**（lock/health/http），被所有 Hook 脚本引用 |
 | [hooks/session-start.js](hooks/session-start.js) | session-start (bash) | 自动启动逻辑 |
 | [commands/pet-control.js](commands/pet-control.js) | pet-control.sh | `/pet` 命令实现 |
 | [commands/pet-control.sh](commands/pet-control.sh) | — | Unix 启动器（2 行，转发到 .js） |
 | [commands/pet-control.cmd](commands/pet-control.cmd) | — | Windows 启动器（2 行，转发到 .js） |
 
-原有的 `.sh` 脚本保留作为 Unix 备选，`run-hook.cmd` 保留作为向后兼容的 Windows bash 桥接器。
+原有的 `.sh` 脚本保留作为 Unix 备选，`run-hook.cmd` 和 `platform-shell.sh` 保留作为向后兼容的 Windows bash 桥接器（不再需要，但保留以避免破坏旧配置）。
 
 **关键优势：** Windows 不再需要安装 Git Bash。唯一硬依赖是 Node.js 18+（Electron 本身也需要）。
 
 ### `session-start` 脚本细节
 
 [hooks/session-start.js](hooks/session-start.js) 在启动前额外检查：若 port 文件存在但健康检查失败，读取第二行 PID 用 `process.kill(pid, 0)` 检测进程是否存活——若 PID 已死则清理过期 port 文件。
+
+**单实例互斥锁：** 使用 `~/.claude-pet/.launcher.lock` 原子文件锁（`fs.writeFileSync` + `wx` flag）防止多个 Claude Code 会话启动重复的桌宠进程。`session-start.js` 和 `pet-control.js start` 在启动 Electron 前尝试获取锁；Electron 的 `main.js` 在 HTTP 服务启动后释放锁，退出时也清理锁。锁持有者 PID 写入文件，供后续进程检测过期锁。
+
+### 辅助脚本
+
+| 脚本 | 用途 |
+| ---- | ---- |
+| [install.sh](install.sh) / [install.ps1](install.ps1) | 从 GitHub 一键安装（用户使用） |
+| [uninstall.sh](uninstall.sh) / [uninstall.ps1](uninstall.ps1) | 卸载插件 + 清理数据目录 |
+| [dev-install.sh](dev-install.sh) / [dev-install.ps1](dev-install.ps1) | **本地测试安装**——从本地源码目录拷贝/软链接到 `~/.claude/skills/claude-pet`，不从云端拉取 |
 
 ### Git 提交规范
 
@@ -259,4 +278,4 @@ Hook 定义在 **两个文件** 中重复出现：[hooks/hooks.json](hooks/hooks
 - 宠物窗口使用操作系统特定 API：`setVisibleOnAllWorkspaces`（macOS）、`skipTaskbar`（Windows）
 - **Windows 不再需要 Git Bash**——Hook 脚本已用纯 Node.js 重写，仅需 Node.js 18+
 - 需要 Node.js 18+；Electron 33.x
-- **重要**：如果环境变量 `ELECTRON_RUN_AS_NODE=1` 被设置，Electron 会退化为纯 Node.js 模式，桌宠窗口无法启动。`session-start.js` 和 `pet-control.js` 已自动 unset 此变量。手动启动时也需要确保该变量未设置：`unset ELECTRON_RUN_AS_NODE && cd electron && npm start`
+- **重要**：如果环境变量 `ELECTRON_RUN_AS_NODE=1` 被设置，Electron 会退化为纯 Node.js 模式，桌宠窗口无法启动。`session-start.js` 和 `pet-control.js` 在 spawn Electron 时会**完全过滤**该变量（而非设为空字符串，空字符串在某些版本下仍会触发电 Node 模式）。手动启动时也需注意：`export -n ELECTRON_RUN_AS_NODE && cd electron && npm start`

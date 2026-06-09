@@ -5,7 +5,7 @@
   "author": {
     "name": "Jiyao Fei"
   },
-  "homepage": "https://github.com/jiyaofei/claude-pet",
+  "homepage": "https://github.com/JackeyInNottingham/claude-pet",
   "license": "MIT",
   "hooks": {
     "PreToolUse": [
