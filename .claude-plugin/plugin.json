@@ -1,6 +1,6 @@
 {
   "name": "claude-pet",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Desktop pet that shows Claude Code's running status with a cute pixel-art mascot. Reflects real-time states like reading, writing, executing, and handles permission requests through an interactive dialog.",
   "author": {
     "name": "Jiyao Fei"

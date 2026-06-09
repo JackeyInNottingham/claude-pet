@@ -192,8 +192,9 @@ Hook 定义在 **两个文件** 中重复出现：[hooks/hooks.json](hooks/hooks
 
 **同步关系：**
 
-- `VERSION` → 构建时自动同步到 `.claude-plugin/plugin.json` (`version` 字段)
-- `VERSION` → 构建时自动同步到 `electron/package.json` (`version` 字段)
+- `VERSION` → 运行 `node scripts/sync-version.js` 同步到 `plugin.json` 和 `package.json`
+- `npm start` / `npm run demo` 自动在启动前执行同步
+- `package-release.sh` 构建时自动同步
 - `update-checker.js` 优先读 `VERSION`，依次 fallback 到 `plugin.json`、`package.json`
 
 **版本号规则（手动判断）：**
